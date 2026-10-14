@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🎵 節奏大師：多人連線猜歌</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --panel-bg: #1e293b;
+      --primary: #8b5cf6;
+      --primary-hover: #7c3aed;
+      --accent: #10b981;
+      --danger: #ef4444;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    .container {
+      width: 100%;
+      max-width: 600px;
+      background: var(--panel-bg);
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+      padding: 30px;
+      box-sizing: border-box;
+      position: relative;
+    }
+    .screen { display: none; }
+    .screen.active { display: block; animation: fadeIn 0.4s ease; }
+    
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    h1, h2, h3 { text-align: center; margin-top: 0; }
+    h1 { color: var(--primary); text-shadow: 0 0 10px rgba(139, 92, 246, 0.5); }
+    
+    button {
+      background: var(--primary);
+      color: white;
+      border: none;
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-size: 16px;
+      font-weight: bold;
+      cursor: pointer;
+      width: 100%;
+      margin-bottom: 15px;
+      transition: all 0.2s;
+    }
+    button:hover:not(:disabled) { background: var(--primary-hover); transform: scale(1.02); }
+    button:disabled { background: #475569; cursor: not-allowed; opacity: 0.7; }
+    button.btn-secondary { background: #334155; }
+    button.btn-secondary:hover:not(:disabled) { background: #475569; }
+    button.btn-danger { background: var(--danger); }
+    button.btn-danger:hover:not(:disabled) { background: #dc2626; }
+    
+    /* 答題按鈕狀態 */
+    .answer-btn.correct { background: var(--accent) !important; color: white !important; }
+    .answer-btn.wrong { background: var(--danger) !important; color: white !important; }
+
+    input, select {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 15px;
+      border-radius: 10px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: white;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+
+    .player-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+    .player-card { background: #334155; padding: 15px; border-radius: 10px; text-align: center; }
+    .player-card.empty { border: 2px dashed #475569; background: transparent; color: var(--text-muted); }
+
+    .timer-bar { width: 100%; height: 10px; background: #334155; border-radius: 5px; margin-bottom: 20px; overflow: hidden; }
+    .timer-fill { height: 100%; background: var(--accent); width: 100%; transition: width linear; }
+    
+    .question-box { background: #0f172a; padding: 20px; border-radius: 15px; text-align: center; margin-bottom: 20px; border: 1px solid #334155; }
+    .answer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .answer-btn { margin-bottom: 0; background: #334155; min-height: 60px; font-size: 15px; }
+
+    .live-scoreboard { margin-bottom: 20px; padding: 15px; background: #0f172a; border-radius: 10px; border: 1px solid #334155; }
+    .score-row { display: flex; align-items: center; margin-bottom: 8px; }
+    .score-name { width: 80px; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .score-bar-bg { flex-grow: 1; height: 12px; background: #334155; border-radius: 6px; margin: 0 10px; overflow: hidden; }
+    .score-bar-fill { height: 100%; background: var(--primary); width: 0%; transition: width 0.3s ease; }
+    .score-text { width: 40px; text-align: right; font-weight: bold; color: var(--accent); }
+
+    /* 過渡畫面覆蓋層 */
+    #transitionOverlay {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(15, 23, 42, 0.9);
+      display: none; justify-content: center; align-items: center; flex-direction: column;
+      border-radius: 20px; z-index: 100;
+    }
+    #transitionMessage { font-size: 28px; font-weight: bold; margin-bottom: 10px; }
+    #transitionSub { font-size: 16px; color: var(--text-muted); }
+
+  </style>
+</head>
+<body>
+
+<div class="container">
+  
+  <div id="transitionOverlay">
+    <div id="transitionMessage">答對了！</div>
+    <div id="transitionSub">準備進入下一題...</div>
+  </div>
+
+  <div id="screen-welcome" class="screen active">
+    <h1>🎵 節奏大師</h1>
+    <p style="text-align: center; color: var(--text-muted);">目標 100 分殊死戰</p>
+    <div style="margin-top: 40px;">
+      <input type="text" id="playerNameInput" placeholder="輸入你的專屬暱稱" value="玩家1" />
+      <button onclick="createRoom()">👑 創建房間</button>
+      <div style="display: flex; gap: 10px; align-items: center; margin-top: 20px;">
+        <input type="text" id="roomCodeInput" placeholder="輸入 4 碼房間代碼" maxlength="4" style="margin-bottom: 0;" />
+        <button onclick="joinRoom()" class="btn-secondary" style="margin-bottom: 0;">加入</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-lobby" class="screen">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h2 style="margin: 0;">房間代碼: <span id="displayRoomCode" style="color: var(--accent);"></span></h2>
+      <span style="background: #334155; padding: 5px 10px; border-radius: 5px; font-size: 14px;">👑 房主</span>
+    </div>
+
+    <div class="player-grid" id="playerGrid"></div>
+    <button onclick="addBot()" class="btn-secondary" id="btnAddBot">🤖 新增人機玩家</button>
+
+    <div style="background: #0f172a; padding: 15px; border-radius: 10px; margin-bottom: 20px; margin-top: 10px;">
+      <h3 style="font-size: 16px; margin-bottom: 15px; text-align: left;">⚙️ 遊戲設定 (真實抓歌系統)</h3>
+      
+      <!-- 真正讓你輸入歌手的地方 -->
+      <label style="font-size: 14px; color: var(--text-muted);">搜尋歌手 (例如: 周杰倫, 五月天)</label>
+      <input type="text" id="settingSinger" placeholder="請輸入歌手名稱..." value="林俊傑" />
+      
+      <!-- 真正的難度選擇 -->
+      <label style="font-size: 14px; color: var(--text-muted); margin-top: 10px; display: block;">難度 (影響秒數)</label>
+      <select id="settingDifficulty">
+        <option value="easy">簡單 (20秒)</option>
+        <option value="normal" selected>普通 (10秒)</option>
+        <option value="hard">困難 (5秒)</option>
+      </select>
+
+      <label style="font-size: 14px; color: var(--text-muted); margin-top: 10px; display: block;">模式</label>
+      <select id="settingMode">
+        <option value="answer">⏱️ 純聽歌模式</option>
+        <option value="mixed">🎭 混合模式 (附帶歌詞提示)</option>
+      </select>
+    </div>
+
+    <button id="btnStart" onclick="fetchSongsAndStart()" style="font-size: 20px; padding: 15px;">▶ 搜尋歌曲並開始！</button>
+    <p id="loadingMsg" style="display:none; text-align:center; color: var(--accent);">正在向音樂庫抓取歌曲中...</p>
+  </div>
+
+  <div id="screen-game" class="screen">
+    <div style="display: flex; justify-content: space-between; margin-bottom: 15px; align-items: center;">
+      <h3 style="margin: 0; color: var(--primary);">第 <span id="roundNumber">1</span> 題</h3>
+      <span style="background: #334155; padding: 5px 10px; border-radius: 5px; font-size: 14px; color: var(--accent);">目標：100 分</span>
+    </div>
+    
+    <div class="live-scoreboard" id="liveScoreboard"></div>
+
+    <div class="timer-bar"><div class="timer-fill" id="timerFill"></div></div>
+
+    <div class="question-box">
+      <h3 style="color: var(--primary); margin-bottom: 10px;">🎵 <span id="nowPlayingText">正在播放曲目...</span></h3>
+      
+      <!-- 混合模式的歌詞提示區 -->
+      <p id="lyricHint" style="display: none; font-style: italic; color: #93c5fd; font-size: 18px; margin: 15px 0;">
+        「歌詞載入中...」
+      </p>
+
+      <div style="height: 40px; display: flex; justify-content: center; align-items: center; gap: 5px; margin-top: 15px;">
+        <div style="width: 5px; height: 100%; background: var(--accent); animation: pulse 0.5s infinite alternate;"></div>
+        <div style="width: 5px; height: 60%; background: var(--accent); animation: pulse 0.7s infinite alternate;"></div>
+        <div style="width: 5px; height: 80%; background: var(--accent); animation: pulse 0.6s infinite alternate;"></div>
+      </div>
+      
+      <!-- 隱藏的音樂播放器 -->
+      <audio id="audioPlayer" style="display: none;"></audio>
+    </div>
+
+    <!-- 真槍實彈的選項區 -->
+    <div class="answer-grid" id="answerButtonsArea">
+      <button class="answer-btn" onclick="submitAnswer(0)" id="btn0">選項A</button>
+      <button class="answer-btn" onclick="submitAnswer(1)" id="btn1">選項B</button>
+      <button class="answer-btn" onclick="submitAnswer(2)" id="btn2">選項C</button>
+      <button class="answer-btn" onclick="submitAnswer(3)" id="btn3">選項D</button>
+    </div>
+
+  </div>
+
+  <div id="screen-result" class="screen">
+    <h2>🏆 遊戲結束！</h2>
+    <h3 style="color: var(--accent); margin-bottom: 20px;"><span id="winnerName">玩家1</span> 率先達到 100 分！</h3>
+    
+    <div style="background: white; padding: 10px; border-radius: 10px; margin-bottom: 20px; overflow-x: auto;">
+      <div style="min-width: 400px;" id="chartContainer">
+        <canvas id="scoreChart" height="250"></canvas>
+      </div>
+    </div>
+
+    <button onclick="playAgain()">🔄 回到大廳重選歌手</button>
+  </div>
+
+</div>
+
+<script>
+  const style = document.createElement('style');
+  style.innerHTML = `@keyframes pulse { 0% { height: 20%; } 100% { height: 100%; } }`;
+  document.head.appendChild(style);
+
+  let players = [];
+  let roomCode = "";
+  let chartInstance = null;
+  let currentRound = 1;
+  const WINNING_SCORE = 100;
+  let scoreHistory = {}; 
+
+  // 音樂相關變數
+  let songBank = []; // 抓回來的題庫
+  let currentCorrectSong = null;
+  let currentOptions = [];
+  let timerInterval;
+  let roundStartTime;
+  let timeLimitSeconds = 10;
+  let hasAnsweredThisRound = false;
+
+  const audioPlayer = document.getElementById('audioPlayer');
+
+  function showScreen(screenId) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(screenId).classList.add('active');
+  }
+
+  function createRoom() {
+    const name = document.getElementById('playerNameInput').value || "玩家1";
+    players = [{ id: 0, name: name, isBot: false, score: 0 }];
+    roomCode = Math.floor(1000 + Math.random() * 9000).toString();
+    document.getElementById('displayRoomCode').innerText = roomCode;
+    updateLobby();
+    showScreen('screen-lobby');
+  }
+
+  function joinRoom() { createRoom(); }
+
+  function addBot() {
+    if (players.length >= 4) return;
+    const botNames = ["🤖 阿呆", "🤖 小音", "🤖 節奏"];
+    players.push({ id: players.length, name: botNames[players.length - 1], isBot: true, score: 0 });
+    updateLobby();
+  }
+
+  function updateLobby() {
+    const grid = document.getElementById('playerGrid');
+    grid.innerHTML = "";
+    for(let i=0; i<4; i++) {
+      if(players[i]) grid.innerHTML += `<div class="player-card">${players[i].name}</div>`;
+      else grid.innerHTML += `<div class="player-card empty">等待加入...</div>`;
+    }
+    document.getElementById('btnAddBot').style.display = players.length >= 4 ? 'none' : 'block';
+  }
+
+  // 1. 真實去抓取 iTunes 的試聽音樂
+  async function fetchSongsAndStart() {
+    const singerName = document.getElementById('settingSinger').value;
+    if(!singerName) { alert("請輸入歌手名字！"); return; }
+
+    document.getElementById('btnStart').style.display = 'none';
+    document.getElementById('loadingMsg').style.display = 'block';
+
+    try {
+      // 呼叫 iTunes API 搜尋該歌手的歌
+      const response = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(singerName)}&entity=song&limit=50`);
+      const data = await response.json();
+
+      if(data.results.length < 4) {
+        alert("找不到足夠的歌曲，請換一個更知名的歌手試試！");
+        document.getElementById('btnStart').style.display = 'block';
+        document.getElementById('loadingMsg').style.display = 'none';
+        return;
+      }
+
+      // 把抓到的歌存進題庫
+      songBank = data.results.map(song => ({
+        trackName: song.trackName,
+        previewUrl: song.previewUrl,
+        collectionName: song.collectionName // 用專輯名稱假裝是歌詞提示
+      })).filter(song => song.previewUrl); // 確保有試聽音源
+
+      document.getElementById('loadingMsg').style.display = 'none';
+      
+      // 設定難度秒數
+      const diff = document.getElementById('settingDifficulty').value;
+      if(diff === 'easy') timeLimitSeconds = 20;
+      else if(diff === 'normal') timeLimitSeconds = 10;
+      else if(diff === 'hard') timeLimitSeconds = 5;
+
+      startGame();
+    } catch(err) {
+      alert("抓取歌曲失敗，請檢查網路！");
+      document.getElementById('btnStart').style.display = 'block';
+      document.getElementById('loadingMsg').style.display = 'none';
+    }
+  }
+
+  function startGame() {
+    currentRound = 1;
+    players.forEach(p => { p.score = 0; scoreHistory[p.id] = [0]; });
+    updateLiveScoreboard();
+    prepareRound();
+    showScreen('screen-game');
+  }
+
+  // 2. 準備下一題的畫面與音樂
+  function prepareRound() {
+    hasAnsweredThisRound = false;
+    document.getElementById('roundNumber').innerText = currentRound;
+    
+    // 恢復按鈕狀態
+    for(let i=0; i<4; i++) {
+      const btn = document.getElementById(`btn${i}`);
+      btn.className = "answer-btn";
+      btn.disabled = false;
+    }
+
+    // 隨機挑 4 首不同的歌當選項
+    let shuffledBank = [...songBank].sort(() => 0.5 - Math.random());
+    currentOptions = shuffledBank.slice(0, 4);
+    
+    // 其中第 1 首是正確答案
+    currentCorrectSong = currentOptions[0];
+    
+    // 把這 4 個選項打亂放到按鈕上
+    currentOptions.sort(() => 0.5 - Math.random());
+    
+    for(let i=0; i<4; i++) {
+      document.getElementById(`btn${i}`).innerText = currentOptions[i].trackName;
+    }
+
+    // 處理混合模式的歌詞提示 (這裡因為沒有免費合法歌詞API，用專輯名稱替代模擬)
+    const mode = document.getElementById('settingMode').value;
+    const lyricP = document.getElementById('lyricHint');
+    if(mode === 'mixed') {
+      lyricP.style.display = 'block';
+      lyricP.innerText = `「出自專輯：${currentCorrectSong.collectionName}」`;
+    } else {
+      lyricP.style.display = 'none';
+    }
+
+    // 播放音樂
+    audioPlayer.src = currentCorrectSong.previewUrl;
+    audioPlayer.play().catch(e => console.log("瀏覽器擋自動播放，需手動點擊"));
+
+    startTimer();
+  }
+
+  // 3. 倒數計時器
+  function startTimer() {
+    clearInterval(timerInterval);
+    const fill = document.getElementById('timerFill');
+    fill.style.transition = 'none';
+    fill.style.width = '100%';
+    
+    // 強制重繪
+    void fill.offsetWidth;
+    
+    fill.style.transition = `width ${timeLimitSeconds}s linear`;
+    fill.style.width = '0%';
+
+    roundStartTime = Date.now();
+    
+    timerInterval = setTimeout(() => {
+      if(!hasAnsweredThisRound) {
+        handleTimeUp();
+      }
+    }, timeLimitSeconds * 1000);
+  }
+
+  function handleTimeUp() {
+    hasAnsweredThisRound = true;
+    audioPlayer.pause();
+    showTransition("時間到！", "太慢了，沒有人得分！", false);
+  }
+
+  // 4. 點擊選項後的處理 (包含計算越快分數越高)
+  function submitAnswer(btnIndex) {
+    if(hasAnsweredThisRound) return;
+    hasAnsweredThisRound = true;
+    clearInterval(timerInterval);
+    audioPlayer.pause();
+
+    // 鎖定所有按鈕
+    for(let i=0; i<4; i++) document.getElementById(`btn${i}`).disabled = true;
+
+    const clickedBtn = document.getElementById(`btn${btnIndex}`);
+    const clickedSongName = clickedBtn.innerText;
+    
+    const isCorrect = (clickedSongName === currentCorrectSong.trackName);
+
+    if(isCorrect) {
+      clickedBtn.classList.add('correct');
+      
+      // 計算分數：越快答對分數越高 (最高 10 分，最低 1 分)
+      const timeTaken = (Date.now() - roundStartTime) / 1000;
+      const timeRatio = Math.max(0, 1 - (timeTaken / timeLimitSeconds));
+      const pointsGained = Math.ceil(timeRatio * 9) + 1; // 1~10分
+      
+      players[0].score += pointsGained;
+      scoreHistory[players[0].id].push(players[0].score);
+
+      showTransition("答對了！", `反應超快，獲得 ${pointsGained} 分！`, true);
+    } else {
+      clickedBtn.classList.add('wrong');
+      // 標示出正確答案
+      for(let i=0; i<4; i++) {
+        if(document.getElementById(`btn${i}`).innerText === currentCorrectSong.trackName) {
+          document.getElementById(`btn${i}`).classList.add('correct');
+        }
+      }
+      
+      scoreHistory[players[0].id].push(players[0].score); // 分數不變也要記錄折線
+      showTransition("答錯了！", "正確答案標示為綠色。", false);
+    }
+
+    // 機器人模擬答題 (有 50% 機率答對)
+    players.forEach(p => {
+      if(p.isBot) {
+        if(Math.random() > 0.5) p.score += Math.floor(Math.random() * 8) + 1;
+        scoreHistory[p.id].push(p.score);
+      }
+    });
+
+    updateLiveScoreboard();
+  }
+
+  // 5. 顯示過渡畫面並判定是否結束
+  function showTransition(mainText, subText, isSuccess) {
+    const overlay = document.getElementById('transitionOverlay');
+    const msgObj = document.getElementById('transitionMessage');
+    
+    msgObj.innerText = mainText;
+    msgObj.style.color = isSuccess ? 'var(--accent)' : 'var(--danger)';
+    document.getElementById('transitionSub').innerText = subText;
+    
+    overlay.style.display = 'flex';
+
+    setTimeout(() => {
+      overlay.style.display = 'none';
+      checkWinCondition();
+    }, 2500); // 停頓 2.5 秒
+  }
+
+  function checkWinCondition() {
+    let winner = players.find(p => p.score >= WINNING_SCORE);
+    
+    if (winner) {
+      document.getElementById('winnerName').innerText = winner.name + " (" + winner.score + " 分)";
+      endGame();
+    } else {
+      currentRound++;
+      prepareRound();
+    }
+  }
+
+  function updateLiveScoreboard() {
+    const board = document.getElementById('liveScoreboard');
+    board.innerHTML = "";
+    players.forEach(p => {
+      const percentage = Math.min((p.score / WINNING_SCORE) * 100, 100);
+      board.innerHTML += `
+        <div class="score-row">
+          <div class="score-name">${p.name}</div>
+          <div class="score-bar-bg"><div class="score-bar-fill" style="width: ${percentage}%"></div></div>
+          <div class="score-text">${p.score}</div>
+        </div>
+      `;
+    });
+  }
+
+  function endGame() { showScreen('screen-result'); renderChart(); }
+
+  function renderChart() {
+    const ctx = document.getElementById('scoreChart').getContext('2d');
+    if (chartInstance) chartInstance.destroy();
+
+    const labels = Array.from({length: currentRound + 1}, (_, i) => i === 0 ? '開始' : `第${i}題`);
+    const colors = ['#8b5cf6', '#10b981', '#f59e0b', '#ef4444'];
+    const datasets = players.map((p, index) => ({
+      label: p.name, data: scoreHistory[p.id], borderColor: colors[index % colors.length], tension: 0.3, fill: false
+    }));
+
+    const chartWidth = Math.max(400, (currentRound * 30)); 
+    document.getElementById('chartContainer').style.width = chartWidth + 'px';
+
+    chartInstance = new Chart(ctx, {
+      type: 'line', data: { labels: labels, datasets: datasets },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { title: { display: true, text: '飆分之路' } }, scales: { y: { beginAtZero: true, suggestedMax: 100 } } }
+    });
+  }
+
+  function playAgain() { 
+    document.getElementById('btnStart').style.display = 'block';
+    showScreen('screen-lobby'); 
+  }
+</script>
+</body>
+</html>
